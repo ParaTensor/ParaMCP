@@ -1,0 +1,2 @@
+# ParaMCP
+local mcp server
