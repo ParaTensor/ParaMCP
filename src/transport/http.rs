@@ -1,0 +1,119 @@
+use crate::protocol::JsonRpcRequest;
+use crate::server::McpServer;
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
+};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tracing::{error, info};
+
+/// Handler for the POST /mcp endpoint. Performs strict MCP 2026-07-28 header validation.
+pub async fn handle_mcp_post(
+    State(server): State<Arc<McpServer>>,
+    headers: HeaderMap,
+    Json(payload): Json<JsonRpcRequest>,
+) -> impl IntoResponse {
+    // 1. Verify MCP-Protocol-Version header is present
+    let version_header = match headers.get("MCP-Protocol-Version").and_then(|v| v.to_str().ok()) {
+        Some(v) => v,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Missing or invalid MCP-Protocol-Version header",
+            )
+                .into_response();
+        }
+    };
+    info!("Client requested protocol version: {}", version_header);
+
+    // 2. Verify Mcp-Method header exists and matches the body method field
+    let method_header = match headers.get("Mcp-Method").and_then(|v| v.to_str().ok()) {
+        Some(m) => m,
+        None => {
+            return (StatusCode::BAD_REQUEST, "Missing or invalid Mcp-Method header").into_response();
+        }
+    };
+
+    if method_header != payload.method {
+        error!(
+            "Header Mcp-Method '{}' mismatches JSON-RPC method '{}'",
+            method_header, payload.method
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Mcp-Method header '{}' does not match JSON-RPC body method '{}'",
+                method_header, payload.method
+            ),
+        )
+            .into_response();
+    }
+
+    // 3. For tools/call, verify Mcp-Name header exists and matches parameters name
+    if payload.method == "tools/call" {
+        let name_header = match headers.get("Mcp-Name").and_then(|v| v.to_str().ok()) {
+            Some(n) => n,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Missing or invalid Mcp-Name header for tools/call",
+                )
+                    .into_response();
+            }
+        };
+
+        let tool_name = payload
+            .params
+            .as_ref()
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str());
+
+        match tool_name {
+            Some(name) => {
+                if name_header != name {
+                    error!(
+                        "Header Mcp-Name '{}' mismatches parameters tool name '{}'",
+                        name_header, name
+                    );
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!(
+                            "Mcp-Name header '{}' does not match parameter name '{}'",
+                            name_header, name
+                        ),
+                    )
+                        .into_response();
+                }
+            }
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Missing tool name inside request parameters object",
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    // 4. Handle request statelessly
+    let resp = server.handle_request(payload).await;
+    Json(resp).into_response()
+}
+
+/// Start the high-performance Axum HTTP server listener on the specified port.
+pub async fn run_http_transport(server: Arc<McpServer>, port: u16) -> anyhow::Result<()> {
+    let app = Router::new()
+        .route("/mcp", post(handle_mcp_post))
+        .with_state(server);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!("Starting high-performance HTTP MCP server listening on {}", addr);
+
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
