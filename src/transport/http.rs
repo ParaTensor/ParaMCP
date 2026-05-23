@@ -104,13 +104,14 @@ pub async fn handle_mcp_post(
     Json(resp).into_response()
 }
 
-/// Start the high-performance Axum HTTP server listener on the specified port.
-pub async fn run_http_transport(server: Arc<McpServer>, port: u16) -> anyhow::Result<()> {
+/// Start the high-performance Axum HTTP server listener on the specified host:port.
+/// Default host is 127.0.0.1 (safe, local-only). Bind 0.0.0.0 only behind auth/reverse-proxy.
+pub async fn run_http_transport(server: Arc<McpServer>, host: &str, port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/mcp", post(handle_mcp_post))
         .with_state(server);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
     info!("Starting high-performance HTTP MCP server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;

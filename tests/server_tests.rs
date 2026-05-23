@@ -117,6 +117,7 @@ async fn test_tools_call_file_search() {
     let registry = Arc::new(ToolRegistry::new());
     let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set in test");
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(RequestId::Number(4)),
@@ -124,7 +125,7 @@ async fn test_tools_call_file_search() {
         params: Some(json!({
             "name": "file_search",
             "arguments": {
-                "dir": "/home/xinference/github/ParaMCP",
+                "dir": manifest_dir,
                 "pattern": "paramcp",
                 "extension": "toml"
             }
@@ -154,7 +155,7 @@ async fn test_http_transport() {
     drop(listener);
 
     let server_handle = tokio::spawn(async move {
-        paramcp::transport::http::run_http_transport(Arc::new(server), port).await.unwrap();
+        paramcp::transport::http::run_http_transport(Arc::new(server), "127.0.0.1", port).await.unwrap();
     });
 
     // Wait a brief moment for the server to start
@@ -239,9 +240,34 @@ async fn test_hub_aggregation_and_proxy() {
     let _ = tracing_subscriber::fmt().try_init();
     let registry = Arc::new(ToolRegistry::new());
     
-    // Spawn HubManager using our test config
-    let config_path = std::path::Path::new("/home/xinference/github/ParaMCP/scratch/test_config.json");
-    let hub = Arc::new(HubManager::new(config_path).await.expect("Failed to initialize HubManager"));
+    // Dynamically build portable test config using CARGO_MANIFEST_DIR + scratch mocks
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let scratch = format!("{}/scratch", manifest);
+    let stateless_py = format!("{}/stateless_mock.py", scratch);
+    let legacy_py = format!("{}/legacy_mock.py", scratch);
+    let temp_config_path = format!("/tmp/paramcp_test_config_{}.json", std::process::id());
+    let config_json = format!(
+        r#"{{
+  "sub_servers": [
+    {{
+      "name": "stateless-mock",
+      "command": "python3",
+      "args": ["{}"],
+      "protocol_version": "2026-07-28"
+    }},
+    {{
+      "name": "legacy-mock",
+      "command": "python3",
+      "args": ["{}"],
+      "protocol_version": "legacy"
+    }}
+  ]
+}}"#,
+        stateless_py, legacy_py
+    );
+    std::fs::write(&temp_config_path, &config_json).expect("Failed to write temp test config");
+    let config_path = std::path::Path::new(&temp_config_path);
+    let hub = Arc::new(HubManager::new(config_path).await.expect("Failed to initialize HubManager with portable config"));
     let server = McpServer::new(registry, Arc::clone(&hub));
 
     // 1. Check tools list aggregation
