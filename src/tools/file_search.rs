@@ -6,7 +6,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct FileSearchTool;
 
@@ -24,7 +24,7 @@ impl Tool for FileSearchTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "file_search".to_string(),
-            description: Some("Search for exact regex patterns inside text files in a directory recursively.".to_string()),
+            description: Some("Search for regex patterns in text files under current working dir recursively (sandboxed for security; only cwd subtree allowed).".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -49,45 +49,71 @@ impl Tool for FileSearchTool {
     fn call(&self, arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
         Box::pin(async move {
             let dir_str = match arguments.as_ref().and_then(|a| a.get("dir").and_then(|d| d.as_str())) {
-                Some(d) => d,
+                Some(d) => d.to_string(),
                 None => return missing_arg("dir"),
             };
             let pattern_str = match arguments.as_ref().and_then(|a| a.get("pattern").and_then(|p| p.as_str())) {
-                Some(p) => p,
+                Some(p) => p.to_string(),
                 None => return missing_arg("pattern"),
             };
-            let extension = arguments.as_ref().and_then(|a| a.get("extension").and_then(|e| e.as_str()));
+            let extension = arguments.as_ref().and_then(|a| a.get("extension").and_then(|e| e.as_str())).map(|s| s.to_string());
 
-            let dir_path = Path::new(dir_str);
-            if !dir_path.exists() || !dir_path.is_dir() {
-                return Ok(error_result(format!("Directory does not exist or is not a directory: {}", dir_str)));
-            }
+            // Offload all FS walk + user regex + output building to blocking thread (prevents starving async runtime)
+            let tool_res = match tokio::task::spawn_blocking(move || {
+                // Security: sandbox ...
+                let requested = Path::new(&dir_str);
+                let dir_path = match std::fs::canonicalize(requested) {
+                    Ok(p) => p,
+                    Err(e) => return error_result(format!("Cannot resolve directory (permission or not exist): {}", e)),
+                };
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+                let cwd_root = match std::fs::canonicalize(&cwd) {
+                    Ok(p) => p,
+                    Err(_) => PathBuf::from("/"),
+                };
+                if !dir_path.starts_with(&cwd_root) {
+                    return error_result(
+                        "Security error: file_search only allows directories under the current working directory (sandbox)".to_string(),
+                    );
+                }
+                if !dir_path.exists() || !dir_path.is_dir() {
+                    return error_result(format!("Directory does not exist or is not a directory: {}", dir_str));
+                }
 
-            let regex = match Regex::new(pattern_str) {
-                Ok(r) => r,
-                Err(e) => return Ok(error_result(format!("Invalid regex pattern: {}", e))),
+                let regex = match Regex::new(&pattern_str) {
+                    Ok(r) => r,
+                    Err(e) => return error_result(format!("Invalid regex pattern: {}", e)),
+                };
+
+                let mut matches = Vec::new();
+                let max_matches = 100;
+
+                if let Err(e) = search_dir(&dir_path, &regex, extension.as_deref(), &mut matches, max_matches) {
+                    return error_result(format!("Error searching files: {}", e));
+                }
+
+                let output = json!({
+                    "dir": dir_str,
+                    "pattern": pattern_str,
+                    "matches_count": matches.len(),
+                    "matches": matches
+                });
+
+                ToolCallResult {
+                    content: vec![ToolCallContent::Text(ToolCallTextContent {
+                        text: match serde_json::to_string_pretty(&output) {
+                            Ok(s) => s,
+                            Err(e) => return error_result(format!("Serialization error: {}", e)),
+                        },
+                    })],
+                    is_error: false,
+                }
+            }).await {
+                Ok(res) => res,
+                Err(e) => error_result(format!("file_search worker thread failed: {}", e)),
             };
 
-            let mut matches = Vec::new();
-            let max_matches = 100;
-
-            if let Err(e) = search_dir(dir_path, &regex, extension, &mut matches, max_matches) {
-                return Ok(error_result(format!("Error searching files: {}", e)));
-            }
-
-            let output = json!({
-                "dir": dir_str,
-                "pattern": pattern_str,
-                "matches_count": matches.len(),
-                "matches": matches
-            });
-
-            Ok(ToolCallResult {
-                content: vec![ToolCallContent::Text(ToolCallTextContent {
-                    text: serde_json::to_string_pretty(&output)?,
-                })],
-                is_error: false,
-            })
+            Ok(tool_res)
         })
     }
 }

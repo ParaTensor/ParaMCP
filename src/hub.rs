@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::process::{Child, Command};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::time::{timeout, Duration};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -193,7 +194,11 @@ impl SubprocessHost {
     pub async fn call(&self, req: JsonRpcRequest) -> Result<JsonRpcResponse> {
         let (tx, rx) = oneshot::channel();
         self.tx_request.send((req, tx)).await?;
-        Ok(rx.await?)
+        // Reliability: bounded timeout so a stuck child process does not hang the whole hub / agent
+        let resp = timeout(Duration::from_secs(30), rx)
+            .await
+            .map_err(|_| anyhow::anyhow!("Hub subprocess call timed out after 30s"))??;
+        Ok(resp)
     }
 }
 
