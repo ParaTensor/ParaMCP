@@ -7,15 +7,16 @@ use tracing::info;
 /// Core Model Context Protocol stateless server handler.
 pub struct McpServer {
     registry: Arc<ToolRegistry>,
+    hub: Arc<crate::hub::HubManager>,
 }
 
 impl McpServer {
-    /// Create a new server instance with the given tool registry.
-    pub fn new(registry: Arc<ToolRegistry>) -> Self {
-        Self { registry }
+    /// Create a new server instance with the given tool registry and hub manager.
+    pub fn new(registry: Arc<ToolRegistry>, hub: Arc<crate::hub::HubManager>) -> Self {
+        Self { registry, hub }
     }
 
-    /// Handles a stateless JSON-RPC 2.0 request and returns a JSON-RPC response.
+    /// Handles a stateless or stateful JSON-RPC 2.0 request and returns a JSON-RPC response.
     pub async fn handle_request(&self, req: JsonRpcRequest) -> JsonRpcResponse {
         info!("Handling MCP request: id={:?}, method={}", req.id, req.method);
 
@@ -40,6 +41,8 @@ impl McpServer {
         }
 
         match req.method.as_str() {
+            "initialize" => self.handle_initialize(req).await,
+            "notifications/initialized" => self.handle_initialized_notification(req).await,
             "server/discover" => self.handle_discover(req).await,
             "tools/list" => self.handle_tools_list(req).await,
             "tools/call" => self.handle_tools_call(req).await,
@@ -52,6 +55,34 @@ impl McpServer {
                 None,
             ),
         }
+    }
+
+    async fn handle_initialize(&self, req: JsonRpcRequest) -> JsonRpcResponse {
+        // Return initialize capabilities compatible with legacy clients
+        let client_version = req.params.as_ref()
+            .and_then(|p| p.get("protocolVersion"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("2024-11-05");
+
+        let result = json!({
+            "protocolVersion": client_version,
+            "capabilities": {
+                "tools": {},
+                "resources": {},
+                "prompts": {}
+            },
+            "serverInfo": {
+                "name": "paramcp-hub",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        });
+
+        JsonRpcResponse::success(req.id, result)
+    }
+
+    async fn handle_initialized_notification(&self, req: JsonRpcRequest) -> JsonRpcResponse {
+        // Notifications do not expect standard JSON-RPC success response values, but return success/empty
+        JsonRpcResponse::success(req.id, json!({}))
     }
 
     async fn handle_discover(&self, req: JsonRpcRequest) -> JsonRpcResponse {
@@ -75,7 +106,10 @@ impl McpServer {
     }
 
     async fn handle_tools_list(&self, req: JsonRpcRequest) -> JsonRpcResponse {
-        let tools = self.registry.list_definitions();
+        let mut tools = self.registry.list_definitions();
+        let sub_tools = self.hub.get_merged_tools();
+        tools.extend(sub_tools.iter().cloned());
+
         let result = ToolsListResult {
             tools,
             ttl_ms: Some(300_000), // Cache for 5 minutes (stateless optimization)
@@ -113,6 +147,33 @@ impl McpServer {
             }
         };
 
+        // Check if the tool belongs to a proxy subserver
+        if let Some((subserver_name, original_tool_name)) = self.hub.get_routing(&call_params.name) {
+            if let Some(host) = self.hub.get_host(subserver_name) {
+                // Rewrite the request parameter 'name' to the original name expected by the child
+                let mut modified_params = params.clone();
+                if let Some(obj) = modified_params.as_object_mut() {
+                    obj.insert("name".to_string(), json!(original_tool_name));
+                }
+                
+                let mut modified_req = req.clone();
+                modified_req.params = Some(modified_params);
+                
+                match host.call(modified_req).await {
+                    Ok(resp) => return resp,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            req.id,
+                            INTERNAL_ERROR,
+                            format!("Failed to proxy call to subserver '{}': {}", subserver_name, e),
+                            None,
+                        );
+                    }
+                }
+            }
+        }
+
+        // If not routed to a subserver, execute locally
         let tool = match self.registry.get(&call_params.name) {
             Some(t) => t,
             None => {

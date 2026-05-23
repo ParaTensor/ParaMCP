@@ -1,0 +1,16 @@
+{
+  "sub_servers": [
+    {
+      "name": "stateless-mock",
+      "command": "python3",
+      "args": ["/home/xinference/github/ParaMCP/scratch/stateless_mock.py"],
+      "protocol_version": "2026-07-28"
+    },
+    {
+      "name": "legacy-mock",
+      "command": "python3",
+      "args": ["/home/xinference/github/ParaMCP/scratch/legacy_mock.py"],
+      "protocol_version": "legacy"
+    }
+  ]
+}

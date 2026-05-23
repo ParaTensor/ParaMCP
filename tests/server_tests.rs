@@ -3,11 +3,12 @@ use paramcp::server::McpServer;
 use paramcp::tools::ToolRegistry;
 use serde_json::json;
 use std::sync::Arc;
+use paramcp::hub::HubManager;
 
 #[tokio::test]
 async fn test_server_discover() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -29,7 +30,7 @@ async fn test_server_discover() {
 #[tokio::test]
 async fn test_tools_list() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -58,7 +59,7 @@ async fn test_tools_list() {
 #[tokio::test]
 async fn test_tools_call_calculator() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -86,7 +87,7 @@ async fn test_tools_call_calculator() {
 #[tokio::test]
 async fn test_tools_call_sys_info() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -114,7 +115,7 @@ async fn test_tools_call_sys_info() {
 #[tokio::test]
 async fn test_tools_call_file_search() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -145,7 +146,7 @@ async fn test_tools_call_file_search() {
 #[tokio::test]
 async fn test_http_transport() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
     
     // Find an unused local port
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -218,7 +219,7 @@ async fn test_http_transport() {
 #[tokio::test]
 async fn test_invalid_request() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry);
+    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
 
     // Invalid jsonrpc version
     let req = JsonRpcRequest {
@@ -231,4 +232,70 @@ async fn test_invalid_request() {
     let resp = server.handle_request(req).await;
     assert!(resp.error.is_some());
     assert_eq!(resp.error.unwrap().code, -32600); // Invalid request
+}
+
+#[tokio::test]
+async fn test_hub_aggregation_and_proxy() {
+    let _ = tracing_subscriber::fmt().try_init();
+    let registry = Arc::new(ToolRegistry::new());
+    
+    // Spawn HubManager using our test config
+    let config_path = std::path::Path::new("/home/xinference/github/ParaMCP/scratch/test_config.json");
+    let hub = Arc::new(HubManager::new(config_path).await.expect("Failed to initialize HubManager"));
+    let server = McpServer::new(registry, Arc::clone(&hub));
+
+    // 1. Check tools list aggregation
+    let list_req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(RequestId::Number(1)),
+        method: "tools/list".to_string(),
+        params: None,
+    };
+    let resp = server.handle_request(list_req).await;
+    assert!(resp.error.is_none());
+    
+    let result = resp.result.unwrap();
+    let tools = result.get("tools").unwrap().as_array().unwrap();
+    
+    let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
+    // Built-in tools
+    assert!(tool_names.contains(&"sys_info"));
+    assert!(tool_names.contains(&"calculator"));
+    // Subprocess tools
+    assert!(tool_names.contains(&"stateless_tool"));
+    assert!(tool_names.contains(&"legacy_tool"));
+
+    // 2. Test proxying tools/call to stateless-mock subserver
+    let call_stateless = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(RequestId::Number(2)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "stateless_tool",
+            "arguments": {}
+        })),
+    };
+    let resp_stateless = server.handle_request(call_stateless).await;
+    assert!(resp_stateless.error.is_none());
+    let res_stateless = resp_stateless.result.unwrap();
+    let content_stateless = res_stateless.get("content").unwrap().as_array().unwrap();
+    let text_stateless = content_stateless[0].get("text").unwrap().as_str().unwrap();
+    assert_eq!(text_stateless, "Hello from Stateless Tool");
+
+    // 3. Test proxying tools/call to legacy-mock subserver (requires initialize handshake)
+    let call_legacy = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(RequestId::Number(3)),
+        method: "tools/call".to_string(),
+        params: Some(json!({
+            "name": "legacy_tool",
+            "arguments": {}
+        })),
+    };
+    let resp_legacy = server.handle_request(call_legacy).await;
+    assert!(resp_legacy.error.is_none());
+    let res_legacy = resp_legacy.result.unwrap();
+    let content_legacy = res_legacy.get("content").unwrap().as_array().unwrap();
+    let text_legacy = content_legacy[0].get("text").unwrap().as_str().unwrap();
+    assert_eq!(text_legacy, "Hello from Legacy Tool");
 }

@@ -19,6 +19,10 @@ struct Args {
     /// Port to listen on (only applicable for HTTP transport)
     #[arg(short, long, default_value_t = 8080)]
     port: u16,
+
+    /// Path to the Hub configuration JSON file
+    #[arg(short, long)]
+    config: Option<std::path::PathBuf>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,8 +44,14 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     info!("Starting ParaMCP v{}...", env!("CARGO_PKG_VERSION"));
 
+    let hub = if let Some(ref path) = args.config {
+        Arc::new(paramcp::hub::HubManager::new(path).await?)
+    } else {
+        Arc::new(paramcp::hub::HubManager::empty())
+    };
+
     let registry = Arc::new(ToolRegistry::new());
-    let server = Arc::new(McpServer::new(registry));
+    let server = Arc::new(McpServer::new(registry, hub));
 
     match args.transport {
         TransportType::Stdio => {

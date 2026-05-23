@@ -97,6 +97,7 @@ impl JsonRpcRequest {
 pub struct ToolDefinition {
     pub name: String,
     pub description: Option<String>,
+    #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
 
@@ -116,6 +117,7 @@ pub struct ResourceDefinition {
     pub uri: String,
     pub name: String,
     pub description: Option<String>,
+    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
 }
 
