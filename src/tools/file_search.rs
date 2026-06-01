@@ -16,6 +16,12 @@ impl FileSearchTool {
     }
 }
 
+impl Default for FileSearchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tool for FileSearchTool {
     fn name(&self) -> &str {
         "file_search"
@@ -58,7 +64,10 @@ impl Tool for FileSearchTool {
             };
             let extension = arguments.as_ref().and_then(|a| a.get("extension").and_then(|e| e.as_str()));
 
-            let dir_path = Path::new(dir_str);
+            let dir_path = match validate_search_dir(dir_str) {
+                Ok(p) => p,
+                Err(e) => return Ok(error_result(e.to_string())),
+            };
             if !dir_path.exists() || !dir_path.is_dir() {
                 return Ok(error_result(format!("Directory does not exist or is not a directory: {}", dir_str)));
             }
@@ -71,7 +80,7 @@ impl Tool for FileSearchTool {
             let mut matches = Vec::new();
             let max_matches = 100;
 
-            if let Err(e) = search_dir(dir_path, &regex, extension, &mut matches, max_matches) {
+            if let Err(e) = search_dir(&dir_path, &regex, extension, &mut matches, max_matches) {
                 return Ok(error_result(format!("Error searching files: {}", e)));
             }
 
@@ -90,6 +99,43 @@ impl Tool for FileSearchTool {
             })
         })
     }
+}
+
+/// Validate and sanitize the search directory path.
+/// Rejects directory traversal attempts and system-sensitive paths.
+fn validate_search_dir(dir_str: &str) -> anyhow::Result<std::path::PathBuf> {
+    let path = Path::new(dir_str);
+
+    // Reject paths containing parent directory references
+    for component in path.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err(anyhow::anyhow!("Directory traversal ('..') is not allowed"));
+        }
+    }
+
+    // Canonicalize to resolve symlinks and verify existence
+    let canonical = match path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => return Err(anyhow::anyhow!("Invalid directory path: {}", e)),
+    };
+
+    // Block access to system-sensitive directories
+    const BLOCKED_PREFIXES: &[&str] = &[
+        "/etc", "/proc", "/sys", "/usr", "/bin", "/sbin",
+        "/lib", "/lib64", "/dev", "/var", "/boot", "/run",
+    ];
+    if let Some(path_str) = canonical.to_str() {
+        for prefix in BLOCKED_PREFIXES {
+            if path_str.starts_with(prefix) {
+                return Err(anyhow::anyhow!(
+                    "Access to system directory '{}' is not allowed",
+                    prefix
+                ));
+            }
+        }
+    }
+
+    Ok(canonical)
 }
 
 fn missing_arg(name: &str) -> anyhow::Result<ToolCallResult> {

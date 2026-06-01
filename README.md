@@ -23,6 +23,12 @@ ParaMCP 是一款基于 Rust 开发的、高性能、完全无状态的模型上
 * **极致性能 (High Performance)**
   * 常驻内存仅需数 MB，消除冷启动延迟与垃圾回收抖动。
   * 支持 JSON-RPC 请求标识符（ID）的高并发重映射，防止多进程间调用 ID 碰撞。
+* **进程健康监控与自动清理**
+  * 后台定期检测子进程存活状态，若子服务崩溃自动从路由表中移除其工具，避免调用已失效服务。
+* **HTTP 运维与安全**
+  * 内置 `/health` 健康检查端点，方便负载均衡与容器探针集成。
+  * 支持可选的 `X-Api-Key` HTTP 头部认证，保护生产环境 API 安全。
+  * 支持 CORS 跨域配置，可指定允许来源或使用通配符 `*`。
 * **内置的高性能工具集**
   * `sys_info`: 实时硬件指标监控（CPU 负载、内存分配、OS 及主机信息）。
   * `calculator`: 手写递归下降解析器，高效计算数学算式。
@@ -107,6 +113,11 @@ cargo build --release
 
 # 启动 HTTP 模式，并挂载托管服务于 8080 端口
 ./target/release/paramcp --transport http --port 8080 --config ./paramcp_config.json
+
+# 启动 HTTP 模式并启用 API Key 认证与 CORS
+./target/release/paramcp --transport http --port 8080 --config ./paramcp_config.json \
+  --api-key "your-secret-key" \
+  --allow-origin "*"
 ```
 
 ---
@@ -133,7 +144,43 @@ curl -X POST http://127.0.0.1:8080/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{}}'
 ```
 
+### 健康检查端点
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+### Resources 与 Prompts 示例
+
+读取内置资源：
+
+```bash
+curl -X POST http://127.0.0.1:8080/mcp \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: resources/read" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"paramcp://server/info"}}'
+```
+
+获取 Prompt：
+
+```bash
+curl -X POST http://127.0.0.1:8080/mcp \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: prompts/get" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"explain-code","arguments":{"language":"rust","code":"fn main() {}"}}}'
+```
+
 ---
+
+## 🐳 Docker 构建
+
+```bash
+docker build -t paramcp .
+docker run -p 8080:8080 -v $(pwd)/paramcp_config.json:/app/config.json paramcp \
+  --config /app/config.json --transport http --port 8080
+```
 
 ## 🧪 自动化测试
 

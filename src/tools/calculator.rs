@@ -12,6 +12,12 @@ impl CalculatorTool {
     }
 }
 
+impl Default for CalculatorTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tool for CalculatorTool {
     fn name(&self) -> &str {
         "calculator"

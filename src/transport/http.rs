@@ -1,22 +1,37 @@
 use crate::protocol::JsonRpcRequest;
 use crate::server::McpServer;
 use axum::{
-    extract::State,
-    http::{HeaderMap, StatusCode},
+    extract::{Extension, State},
+    http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
+use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
 /// Handler for the POST /mcp endpoint. Performs strict MCP 2026-07-28 header validation.
 pub async fn handle_mcp_post(
     State(server): State<Arc<McpServer>>,
+    Extension(api_key): Extension<Option<String>>,
     headers: HeaderMap,
     Json(payload): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
+    // 0. Verify API key if configured
+    if let Some(expected) = api_key {
+        let provided = headers.get("X-Api-Key").and_then(|v| v.to_str().ok());
+        if provided != Some(&expected) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Invalid or missing X-Api-Key header",
+            )
+                .into_response();
+        }
+    }
+
     // 1. Verify MCP-Protocol-Version header is present
     let version_header = match headers.get("MCP-Protocol-Version").and_then(|v| v.to_str().ok()) {
         Some(v) => v,
@@ -104,10 +119,41 @@ pub async fn handle_mcp_post(
     Json(resp).into_response()
 }
 
+/// Simple health check endpoint.
+pub async fn handle_health() -> impl IntoResponse {
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
 /// Start the high-performance Axum HTTP server listener on the specified port.
-pub async fn run_http_transport(server: Arc<McpServer>, port: u16) -> anyhow::Result<()> {
+pub async fn run_http_transport(
+    server: Arc<McpServer>,
+    port: u16,
+    api_key: Option<String>,
+    allow_origin: Option<String>,
+) -> anyhow::Result<()> {
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers(Any);
+
+    if let Some(origin) = allow_origin {
+        if origin == "*" {
+            cors = cors.allow_origin(Any);
+        } else {
+            let origin_val = origin.parse().map_err(|e| {
+                anyhow::anyhow!("Invalid CORS allow-origin value '{}': {}", origin, e)
+            })?;
+            cors = cors.allow_origin(tower_http::cors::AllowOrigin::exact(origin_val));
+        }
+    }
+
     let app = Router::new()
         .route("/mcp", post(handle_mcp_post))
+        .route("/health", get(handle_health))
+        .layer(Extension(api_key))
+        .layer(cors)
         .with_state(server);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

@@ -47,7 +47,9 @@ impl McpServer {
             "tools/list" => self.handle_tools_list(req).await,
             "tools/call" => self.handle_tools_call(req).await,
             "resources/list" => self.handle_resources_list(req).await,
+            "resources/read" => self.handle_resources_read(req).await,
             "prompts/list" => self.handle_prompts_list(req).await,
+            "prompts/get" => self.handle_prompts_get(req).await,
             _ => JsonRpcResponse::error(
                 req.id,
                 METHOD_NOT_FOUND,
@@ -149,7 +151,7 @@ impl McpServer {
 
         // Check if the tool belongs to a proxy subserver
         if let Some((subserver_name, original_tool_name)) = self.hub.get_routing(&call_params.name) {
-            if let Some(host) = self.hub.get_host(subserver_name) {
+            if let Some(host) = self.hub.get_host(&subserver_name) {
                 // Rewrite the request parameter 'name' to the original name expected by the child
                 let mut modified_params = params.clone();
                 if let Some(obj) = modified_params.as_object_mut() {
@@ -209,7 +211,14 @@ impl McpServer {
 
     async fn handle_resources_list(&self, req: JsonRpcRequest) -> JsonRpcResponse {
         let result = ResourcesListResult {
-            resources: vec![],
+            resources: vec![
+                ResourceDefinition {
+                    uri: "paramcp://server/info".to_string(),
+                    name: "Server Info".to_string(),
+                    description: Some("Basic metadata about the ParaMCP server instance.".to_string()),
+                    mime_type: Some("application/json".to_string()),
+                },
+            ],
             ttl_ms: Some(300_000),
             cache_scope: Some("shared".to_string()),
         };
@@ -219,11 +228,152 @@ impl McpServer {
         }
     }
 
+    async fn handle_resources_read(&self, req: JsonRpcRequest) -> JsonRpcResponse {
+        let params = match req.params.as_ref() {
+            Some(p) => p,
+            None => {
+                return JsonRpcResponse::error(
+                    req.id,
+                    INVALID_PARAMS,
+                    "Missing parameters".to_string(),
+                    None,
+                );
+            }
+        };
+
+        let read_params: ReadResourceParams = match serde_json::from_value(params.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    req.id,
+                    INVALID_PARAMS,
+                    format!("Invalid parameter structure: {}", e),
+                    None,
+                );
+            }
+        };
+
+        match read_params.uri.as_str() {
+            "paramcp://server/info" => {
+                let text = json!({
+                    "name": "paramcp",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "protocolVersion": "2026-07-28",
+                });
+                let result = ResourceReadResult {
+                    contents: vec![ResourceContent {
+                        uri: read_params.uri,
+                        mime_type: Some("application/json".to_string()),
+                        text: Some(text.to_string()),
+                        blob: None,
+                    }],
+                };
+                match serde_json::to_value(result) {
+                    Ok(val) => JsonRpcResponse::success(req.id, val),
+                    Err(e) => JsonRpcResponse::error(req.id, INTERNAL_ERROR, e.to_string(), None),
+                }
+            }
+            _ => JsonRpcResponse::error(
+                req.id,
+                METHOD_NOT_FOUND,
+                format!("Resource not found: {}", read_params.uri),
+                None,
+            ),
+        }
+    }
+
     async fn handle_prompts_list(&self, req: JsonRpcRequest) -> JsonRpcResponse {
-        let result = PromptsListResult { prompts: vec![] };
+        let result = PromptsListResult {
+            prompts: vec![
+                PromptDefinition {
+                    name: "explain-code".to_string(),
+                    description: Some("Explain a piece of code in plain language.".to_string()),
+                    arguments: Some(vec![
+                        PromptArgument {
+                            name: "language".to_string(),
+                            description: Some("Programming language of the code.".to_string()),
+                            required: Some(true),
+                        },
+                        PromptArgument {
+                            name: "code".to_string(),
+                            description: Some("The code snippet to explain.".to_string()),
+                            required: Some(true),
+                        },
+                    ]),
+                },
+            ],
+        };
         match serde_json::to_value(result) {
             Ok(val) => JsonRpcResponse::success(req.id, val),
             Err(e) => JsonRpcResponse::error(req.id, INTERNAL_ERROR, e.to_string(), None),
+        }
+    }
+
+    async fn handle_prompts_get(&self, req: JsonRpcRequest) -> JsonRpcResponse {
+        let params = match req.params.as_ref() {
+            Some(p) => p,
+            None => {
+                return JsonRpcResponse::error(
+                    req.id,
+                    INVALID_PARAMS,
+                    "Missing parameters".to_string(),
+                    None,
+                );
+            }
+        };
+
+        let get_params: GetPromptParams = match serde_json::from_value(params.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    req.id,
+                    INVALID_PARAMS,
+                    format!("Invalid parameter structure: {}", e),
+                    None,
+                );
+            }
+        };
+
+        match get_params.name.as_str() {
+            "explain-code" => {
+                let language = get_params
+                    .arguments
+                    .as_ref()
+                    .and_then(|a| a.get("language"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let code = get_params
+                    .arguments
+                    .as_ref()
+                    .and_then(|a| a.get("code"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                let result = PromptGetResult {
+                    description: Some(format!("Explain the following {} code.", language)),
+                    messages: vec![
+                        PromptMessage {
+                            role: "user".to_string(),
+                            content: PromptContent::Text(PromptMessageText {
+                                text: format!(
+                                    "Please explain this {} code in plain language:\n\n```{}\n{}\n```",
+                                    language, language, code
+                                ),
+                            }),
+                        },
+                    ],
+                };
+                match serde_json::to_value(result) {
+                    Ok(val) => JsonRpcResponse::success(req.id, val),
+                    Err(e) => JsonRpcResponse::error(req.id, INTERNAL_ERROR, e.to_string(), None),
+                }
+            }
+            _ => JsonRpcResponse::error(
+                req.id,
+                METHOD_NOT_FOUND,
+                format!("Prompt not found: {}", get_params.name),
+                None,
+            ),
         }
     }
 }

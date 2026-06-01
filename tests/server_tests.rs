@@ -8,7 +8,7 @@ use paramcp::hub::HubManager;
 #[tokio::test]
 async fn test_server_discover() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -30,7 +30,7 @@ async fn test_server_discover() {
 #[tokio::test]
 async fn test_tools_list() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -59,7 +59,7 @@ async fn test_tools_list() {
 #[tokio::test]
 async fn test_tools_call_calculator() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -87,7 +87,7 @@ async fn test_tools_call_calculator() {
 #[tokio::test]
 async fn test_tools_call_sys_info() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
 
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -115,8 +115,9 @@ async fn test_tools_call_sys_info() {
 #[tokio::test]
 async fn test_tools_call_file_search() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
 
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(RequestId::Number(4)),
@@ -124,7 +125,7 @@ async fn test_tools_call_file_search() {
         params: Some(json!({
             "name": "file_search",
             "arguments": {
-                "dir": "/home/xinference/github/ParaMCP",
+                "dir": manifest_dir,
                 "pattern": "paramcp",
                 "extension": "toml"
             }
@@ -146,7 +147,7 @@ async fn test_tools_call_file_search() {
 #[tokio::test]
 async fn test_http_transport() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
     
     // Find an unused local port
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -154,7 +155,7 @@ async fn test_http_transport() {
     drop(listener);
 
     let server_handle = tokio::spawn(async move {
-        paramcp::transport::http::run_http_transport(Arc::new(server), port).await.unwrap();
+        paramcp::transport::http::run_http_transport(Arc::new(server), port, None, None).await.unwrap();
     });
 
     // Wait a brief moment for the server to start
@@ -219,7 +220,7 @@ async fn test_http_transport() {
 #[tokio::test]
 async fn test_invalid_request() {
     let registry = Arc::new(ToolRegistry::new());
-    let server = McpServer::new(registry, Arc::new(HubManager::empty()));
+    let server = McpServer::new(registry, HubManager::empty());
 
     // Invalid jsonrpc version
     let req = JsonRpcRequest {
@@ -240,8 +241,14 @@ async fn test_hub_aggregation_and_proxy() {
     let registry = Arc::new(ToolRegistry::new());
     
     // Spawn HubManager using our test config
-    let config_path = std::path::Path::new("/home/xinference/github/ParaMCP/scratch/test_config.json");
-    let hub = Arc::new(HubManager::new(config_path).await.expect("Failed to initialize HubManager"));
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let config_content = std::fs::read_to_string(format!("{}/scratch/test_config.json", manifest_dir))
+        .expect("Failed to read test config");
+    let config_content = config_content.replace("/home/xinference/github/ParaMCP", manifest_dir);
+    let temp_path = std::env::temp_dir().join("paramcp_test_config.json");
+    std::fs::write(&temp_path, config_content).expect("Failed to write temp config");
+    
+    let hub = HubManager::new(&temp_path).await.expect("Failed to initialize HubManager");
     let server = McpServer::new(registry, Arc::clone(&hub));
 
     // 1. Check tools list aggregation
@@ -298,4 +305,165 @@ async fn test_hub_aggregation_and_proxy() {
     let content_legacy = res_legacy.get("content").unwrap().as_array().unwrap();
     let text_legacy = content_legacy[0].get("text").unwrap().as_str().unwrap();
     assert_eq!(text_legacy, "Hello from Legacy Tool");
+}
+
+#[tokio::test]
+async fn test_resources_read() {
+    let registry = Arc::new(ToolRegistry::new());
+    let server = McpServer::new(registry, HubManager::empty());
+
+    let req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(RequestId::Number(5)),
+        method: "resources/read".to_string(),
+        params: Some(json!({"uri": "paramcp://server/info"})),
+    };
+
+    let resp = server.handle_request(req).await;
+    assert!(resp.error.is_none());
+
+    let result = resp.result.unwrap();
+    let contents = result.get("contents").unwrap().as_array().unwrap();
+    assert_eq!(contents.len(), 1);
+    assert_eq!(contents[0].get("uri").unwrap().as_str().unwrap(), "paramcp://server/info");
+    let text = contents[0].get("text").unwrap().as_str().unwrap();
+    assert!(text.contains("paramcp"));
+}
+
+#[tokio::test]
+async fn test_prompts_get() {
+    let registry = Arc::new(ToolRegistry::new());
+    let server = McpServer::new(registry, HubManager::empty());
+
+    let req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(RequestId::Number(6)),
+        method: "prompts/get".to_string(),
+        params: Some(json!({
+            "name": "explain-code",
+            "arguments": {
+                "language": "rust",
+                "code": "fn main() {}"
+            }
+        })),
+    };
+
+    let resp = server.handle_request(req).await;
+    assert!(resp.error.is_none());
+
+    let result = resp.result.unwrap();
+    let messages = result.get("messages").unwrap().as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    let text = messages[0].get("content").unwrap().get("text").unwrap().as_str().unwrap();
+    assert!(text.contains("rust"));
+    assert!(text.contains("fn main() {}"));
+}
+
+#[tokio::test]
+async fn test_health_endpoint() {
+    let registry = Arc::new(ToolRegistry::new());
+    let server = McpServer::new(registry, HubManager::empty());
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let server_handle = tokio::spawn(async move {
+        paramcp::transport::http::run_http_transport(Arc::new(server), port, None, None).await.unwrap();
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("http://127.0.0.1:{}/health", port))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body.get("status").unwrap().as_str().unwrap(), "ok");
+    assert_eq!(body.get("version").unwrap().as_str().unwrap(), env!("CARGO_PKG_VERSION"));
+
+    server_handle.abort();
+}
+
+#[tokio::test]
+async fn test_http_api_key_auth() {
+    let registry = Arc::new(ToolRegistry::new());
+    let server = McpServer::new(registry, HubManager::empty());
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let api_key = "secret-key-123".to_string();
+    let server_handle = tokio::spawn(async move {
+        paramcp::transport::http::run_http_transport(
+            Arc::new(server),
+            port,
+            Some(api_key),
+            None,
+        )
+        .await
+        .unwrap();
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{}/mcp", port);
+
+    // 1. Missing API key
+    let resp_no_key = client
+        .post(&url)
+        .header("MCP-Protocol-Version", "2026-07-28")
+        .header("Mcp-Method", "server/discover")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_no_key.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // 2. Wrong API key
+    let resp_wrong = client
+        .post(&url)
+        .header("MCP-Protocol-Version", "2026-07-28")
+        .header("Mcp-Method", "server/discover")
+        .header("X-Api-Key", "wrong-key")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "server/discover",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_wrong.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // 3. Correct API key
+    let resp_ok = client
+        .post(&url)
+        .header("MCP-Protocol-Version", "2026-07-28")
+        .header("Mcp-Method", "server/discover")
+        .header("X-Api-Key", "secret-key-123")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "server/discover",
+            "params": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp_ok.status(), reqwest::StatusCode::OK);
+
+    server_handle.abort();
 }

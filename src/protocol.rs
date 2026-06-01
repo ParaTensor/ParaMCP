@@ -226,6 +226,20 @@ pub struct CallToolParams {
     pub arguments: Option<Value>,
 }
 
+/// Read resource parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadResourceParams {
+    pub uri: String,
+}
+
+/// Get prompt parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetPromptParams {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<Value>,
+}
+
 /// Tool Call Result structures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallTextContent {

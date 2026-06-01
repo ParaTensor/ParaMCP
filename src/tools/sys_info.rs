@@ -5,11 +5,21 @@ use std::future::Future;
 use std::pin::Pin;
 use sysinfo::System;
 
-pub struct SysInfoTool;
+pub struct SysInfoTool {
+    system: std::sync::Mutex<System>,
+}
 
 impl SysInfoTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            system: std::sync::Mutex::new(System::new_all()),
+        }
+    }
+}
+
+impl Default for SysInfoTool {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -31,7 +41,7 @@ impl Tool for SysInfoTool {
 
     fn call(&self, _arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
         Box::pin(async move {
-            let mut sys = System::new_all();
+            let mut sys = self.system.lock().unwrap();
             sys.refresh_all();
 
             let total_mem = sys.total_memory();
