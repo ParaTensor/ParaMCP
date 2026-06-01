@@ -104,7 +104,7 @@ impl Tool for FetchUrlTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "fetch_url".to_string(),
-            description: Some("Fetch content from a web URL and convert it to clean readable Markdown text.".to_string()),
+            description: Some("Fetch web URL (http/https only) and convert to Markdown. SSRF protection: blocks localhost/private/cloud-metadata IPs.".to_string()),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -126,6 +126,10 @@ impl Tool for FetchUrlTool {
                     return Ok(error_result("Error: Missing required argument 'url'".to_string()));
                 }
             };
+
+            if let Err(msg) = is_safe_url(url_str) {
+                return Ok(error_result(msg));
+            }
 
             let response = match self.client.get(url_str).send().await {
                 Ok(r) => r,
@@ -161,4 +165,22 @@ fn error_result(msg: String) -> ToolCallResult {
         })],
         is_error: true,
     }
+}
+
+/// Basic SSRF mitigation: only allow public http/https, reject localhost/private IP ranges (string heuristic).
+fn is_safe_url(url: &str) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !lower.starts_with("http://") && !lower.starts_with("https://") {
+        return Err("Only http:// or https:// URLs are allowed".to_string());
+    }
+    if lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("[::1]") || lower.contains("0.0.0.0") {
+        return Err("SSRF blocked: localhost / loopback addresses are not allowed".to_string());
+    }
+    if lower.contains("10.") || lower.contains("192.168.") || lower.contains("172.16.") || lower.contains("172.17.") || lower.contains("172.18.") || lower.contains("172.31.") {
+        return Err("SSRF blocked: private network ranges (10/8, 172.16/12, 192.168/16) are not allowed".to_string());
+    }
+    if lower.contains("169.254.") || lower.contains("metadata.google") || lower.contains("169.254.169.254") {
+        return Err("SSRF blocked: link-local / cloud metadata endpoints are not allowed".to_string());
+    }
+    Ok(())
 }

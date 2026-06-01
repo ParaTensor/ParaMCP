@@ -127,9 +127,11 @@ pub async fn handle_health() -> impl IntoResponse {
     }))
 }
 
-/// Start the high-performance Axum HTTP server listener on the specified port.
+/// Start the high-performance Axum HTTP server listener on the specified host:port.
+/// Default host is 127.0.0.1 (safe, local-only). Bind 0.0.0.0 only behind auth/reverse-proxy.
 pub async fn run_http_transport(
     server: Arc<McpServer>,
+    host: &str,
     port: u16,
     api_key: Option<String>,
     allow_origin: Option<String>,
@@ -156,7 +158,7 @@ pub async fn run_http_transport(
         .layer(cors)
         .with_state(server);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
     info!("Starting high-performance HTTP MCP server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;

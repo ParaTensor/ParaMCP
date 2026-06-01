@@ -41,6 +41,10 @@ struct Args {
     #[arg(short, long, default_value_t = 8080)]
     port: u16,
 
+    /// Host to bind on (HTTP only). Defaults to 127.0.0.1 for security (exposes no dangerous tools to network).
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
     /// Path to the Hub configuration JSON file
     #[arg(short, long)]
     config: Option<std::path::PathBuf>,
@@ -91,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
         }
         TransportType::Http => {
             tokio::select! {
-                result = run_http_transport(server, args.port, args.api_key, args.allow_origin) => { result?; }
+                result = run_http_transport(server, &args.host, args.port, args.api_key, args.allow_origin) => { result?; }
                 _ = shutdown_signal() => { info!("Shutting down HTTP transport gracefully..."); }
             }
         }
