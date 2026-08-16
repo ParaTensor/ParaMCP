@@ -1,0 +1,12 @@
+#!/bin/sh
+export GH_CONFIG_DIR='/Users/xinference/github/zene/cloud/data/workspaces/ws/f4cb14bf-217d-42da-b72e-bd795a539944/.zene/github/gh'
+export XDG_STATE_HOME='/Users/xinference/github/zene/cloud/data/workspaces/ws/f4cb14bf-217d-42da-b72e-bd795a539944/.zene/github/xdg-state'
+export XDG_CACHE_HOME='/Users/xinference/github/zene/cloud/data/workspaces/ws/f4cb14bf-217d-42da-b72e-bd795a539944/.zene/github/xdg-cache'
+export XDG_DATA_HOME='/Users/xinference/github/zene/cloud/data/workspaces/ws/f4cb14bf-217d-42da-b72e-bd795a539944/.zene/github/xdg-data'
+export GH_NO_UPDATE_NOTIFIER=1
+export GH_PROMPT_DISABLED=1
+TOKEN=$(cat '/Users/xinference/github/zene/cloud/data/workspaces/ws/f4cb14bf-217d-42da-b72e-bd795a539944/.zene/github/token')
+[ -n "$TOKEN" ] || exec '/opt/homebrew/bin/gh' "$@"
+export GH_TOKEN="$TOKEN"
+export GITHUB_TOKEN="$TOKEN"
+exec '/opt/homebrew/bin/gh' "$@"

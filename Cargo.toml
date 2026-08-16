@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "paramcp"
 version = "0.1.0"
