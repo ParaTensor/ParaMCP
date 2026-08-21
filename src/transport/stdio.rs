@@ -22,12 +22,8 @@ pub async fn run_stdio_transport(server: Arc<McpServer>) -> io::Result<()> {
             Ok(r) => r,
             Err(e) => {
                 error!("JSON-RPC parse error on stdin: {}", e);
-                let resp = JsonRpcResponse::error(
-                    None,
-                    PARSE_ERROR,
-                    format!("Parse error: {}", e),
-                    None,
-                );
+                let resp =
+                    JsonRpcResponse::error(None, PARSE_ERROR, format!("Parse error: {}", e), None);
                 if let Ok(resp_str) = serde_json::to_string(&resp) {
                     stdout.write_all(resp_str.as_bytes()).await?;
                     stdout.write_all(b"\n").await?;

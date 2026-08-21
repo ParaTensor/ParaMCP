@@ -18,7 +18,10 @@ pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
 
     /// Execute the tool with the given arguments.
-    fn call(&self, arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>>;
+    fn call(
+        &self,
+        arguments: Option<Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>>;
 }
 
 /// A thread-safe registry containing all available tools.

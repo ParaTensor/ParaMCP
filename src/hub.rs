@@ -1,18 +1,18 @@
+use crate::protocol::{JsonRpcRequest, JsonRpcResponse, RequestId, ToolDefinition, INTERNAL_ERROR};
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::process::{Child, Command};
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::time::{timeout, Duration};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{error, info, warn};
-use anyhow::Result;
-use crate::protocol::{JsonRpcRequest, JsonRpcResponse, RequestId, ToolDefinition, INTERNAL_ERROR};
-use std::sync::Mutex as StdMutex;
 
 type PendingRequestMap = HashMap<u64, (Option<RequestId>, oneshot::Sender<JsonRpcResponse>)>;
 
@@ -41,29 +41,35 @@ impl SubprocessHost {
     pub async fn new(config: SubServerConfig) -> Result<Self> {
         let name = config.name.clone();
         let protocol_version = config.protocol_version.clone();
-        
-        let (tx_request, mut rx_request) = mpsc::channel::<(JsonRpcRequest, oneshot::Sender<JsonRpcResponse>)>(100);
-        
+
+        let (tx_request, mut rx_request) =
+            mpsc::channel::<(JsonRpcRequest, oneshot::Sender<JsonRpcResponse>)>(100);
+
         // Spawn the child process
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args)
-           .stdin(Stdio::piped())
-           .stdout(Stdio::piped())
-           .stderr(Stdio::inherit()); // Inherit stderr so child logs print to our console
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit()); // Inherit stderr so child logs print to our console
 
         if let Some(ref envs) = config.env {
             cmd.envs(envs);
         }
 
         let mut child = cmd.spawn()?;
-        let mut stdin = child.stdin.take().ok_or_else(|| anyhow::anyhow!("Failed to open stdin of child"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("Failed to open stdout of child"))?;
-        
-        let pending_requests: Arc<Mutex<PendingRequestMap>> =
-            Arc::new(Mutex::new(HashMap::new()));
-            
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stdin of child"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stdout of child"))?;
+
+        let pending_requests: Arc<Mutex<PendingRequestMap>> = Arc::new(Mutex::new(HashMap::new()));
+
         let next_id = Arc::new(AtomicU64::new(1));
-        
+
         // Background thread to read stdout from the child
         let pending_clone = Arc::clone(&pending_requests);
         let name_clone = name.clone();
@@ -74,7 +80,7 @@ impl SubprocessHost {
                 if trimmed.is_empty() {
                     continue;
                 }
-                
+
                 // Parse response
                 if let Ok(mut resp) = serde_json::from_str::<JsonRpcResponse>(trimmed) {
                     if let Some(ref id) = resp.id {
@@ -82,7 +88,7 @@ impl SubprocessHost {
                             RequestId::Number(n) => *n as u64,
                             RequestId::String(s) => s.parse::<u64>().unwrap_or(0),
                         };
-                        
+
                         let mut pending = pending_clone.lock().await;
                         if let Some((orig_id, tx)) = pending.remove(&id_u64) {
                             resp.id = orig_id;
@@ -129,16 +135,16 @@ impl SubprocessHost {
                     });
                     continue;
                 }
-                
+
                 let internal_id = next_id_clone.fetch_add(1, Ordering::SeqCst);
                 let orig_id = req.id.clone();
                 req.id = Some(RequestId::Number(internal_id as i64));
-                
+
                 {
                     let mut pending = pending_clone_w.lock().await;
                     pending.insert(internal_id, (orig_id, tx));
                 }
-                
+
                 if let Ok(line) = serde_json::to_string(&req) {
                     if let Err(e) = stdin.write_all(line.as_bytes()).await {
                         error!("Failed to write to child {}: {}", name_clone_w, e);
@@ -166,7 +172,7 @@ impl SubprocessHost {
 
     async fn initialize_legacy(&self) -> Result<()> {
         info!("Initializing legacy stateful server {}...", self.name);
-        
+
         let init_req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(RequestId::Number(0)),
@@ -180,14 +186,14 @@ impl SubprocessHost {
                 }
             })),
         };
-        
+
         let (tx, rx) = oneshot::channel();
         self.tx_request.send((init_req, tx)).await?;
         let resp = rx.await?;
         if let Some(err) = resp.error {
             return Err(anyhow::anyhow!("Legacy init failed: {:?}", err));
         }
-        
+
         // Send initialized notification (no response expected per JSON-RPC spec)
         let initialized_notification = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -195,11 +201,13 @@ impl SubprocessHost {
             method: "notifications/initialized".to_string(),
             params: None,
         };
-        
+
         let (tx_n, _rx_n) = oneshot::channel();
-        self.tx_request.send((initialized_notification, tx_n)).await?;
+        self.tx_request
+            .send((initialized_notification, tx_n))
+            .await?;
         // Notifications do not expect responses; the writer loop resolves the channel immediately
-        
+
         info!("Legacy server {} initialized successfully.", self.name);
         Ok(())
     }
@@ -229,11 +237,17 @@ impl SubprocessHost {
         match self.child.lock().await.try_wait() {
             Ok(None) => true,
             Ok(Some(status)) => {
-                warn!("Subprocess '{}' has exited with status: {}", self.name, status);
+                warn!(
+                    "Subprocess '{}' has exited with status: {}",
+                    self.name, status
+                );
                 false
             }
             Err(e) => {
-                warn!("Failed to check status of subprocess '{}': {}", self.name, e);
+                warn!(
+                    "Failed to check status of subprocess '{}': {}",
+                    self.name, e
+                );
                 false
             }
         }
@@ -272,37 +286,42 @@ impl HubManager {
                 method: "tools/list".to_string(),
                 params: None,
             };
-            
+
             match host.call(list_req).await {
                 Ok(resp) => {
                     info!("Successfully fetched tools from child '{}'", sub_cfg.name);
                     if let Some(err) = resp.error {
-                        error!("Failed to fetch tools from child '{}': {:?}", sub_cfg.name, err);
+                        error!(
+                            "Failed to fetch tools from child '{}': {:?}",
+                            sub_cfg.name, err
+                        );
                     } else if let Some(result) = resp.result {
                         if let Some(tools_val) = result.get("tools").and_then(|t| t.as_array()) {
                             for tool_val in tools_val {
-                                if let Ok(mut tool_def) = serde_json::from_value::<ToolDefinition>(tool_val.clone()) {
+                                if let Ok(mut tool_def) =
+                                    serde_json::from_value::<ToolDefinition>(tool_val.clone())
+                                {
                                     let original_name = tool_def.name.clone();
-                                    
+
                                     // Verify namespace collision with built-ins or existing tools
-                                    let is_conflict = tool_routing.contains_key(&original_name) 
+                                    let is_conflict = tool_routing.contains_key(&original_name)
                                         || original_name == "sys_info"
                                         || original_name == "calculator"
                                         || original_name == "file_search"
                                         || original_name == "fetch_url";
-                                        
+
                                     let exposed_name = if is_conflict {
                                         format!("{}__{}", sub_cfg.name, original_name)
                                     } else {
                                         original_name.clone()
                                     };
-                                    
+
                                     tool_def.name = exposed_name.clone();
                                     merged_tools.push(tool_def);
-                                    
+
                                     tool_routing.insert(
                                         exposed_name,
-                                        (sub_cfg.name.clone(), original_name)
+                                        (sub_cfg.name.clone(), original_name),
                                     );
                                 }
                             }
@@ -310,7 +329,10 @@ impl HubManager {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to communicate with child '{}' during startup: {}", sub_cfg.name, e);
+                    error!(
+                        "Failed to communicate with child '{}' during startup: {}",
+                        sub_cfg.name, e
+                    );
                 }
             }
         }
@@ -350,7 +372,10 @@ impl HubManager {
         if let Some(ref hosts_lock) = self.hosts {
             let hosts: Vec<(String, Arc<SubprocessHost>)> = {
                 let hosts = hosts_lock.lock().unwrap();
-                hosts.iter().map(|(k, v)| (k.clone(), Arc::clone(v))).collect()
+                hosts
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                    .collect()
             };
             for (name, host) in hosts {
                 info!("Stopping host '{}'...", name);
@@ -378,7 +403,10 @@ impl HubManager {
         let hosts_snapshot: Vec<(String, Arc<SubprocessHost>)> = match &self.hosts {
             Some(lock) => {
                 let hosts = lock.lock().unwrap();
-                hosts.iter().map(|(k, v)| (k.clone(), Arc::clone(v))).collect()
+                hosts
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                    .collect()
             }
             None => return,
         };
@@ -408,7 +436,8 @@ impl HubManager {
             // Identify tools belonging to this host
             let tools_to_remove: Vec<String> = {
                 let routing = self.tool_routing.lock().unwrap();
-                routing.iter()
+                routing
+                    .iter()
                     .filter(|(_, (srv, _))| srv == &name)
                     .map(|(tool, _)| tool.clone())
                     .collect()
@@ -429,7 +458,11 @@ impl HubManager {
             }
 
             if !tools_to_remove.is_empty() {
-                info!("Cleaned up {} tools from dead host '{}'", tools_to_remove.len(), name);
+                info!(
+                    "Cleaned up {} tools from dead host '{}'",
+                    tools_to_remove.len(),
+                    name
+                );
             }
         }
     }
