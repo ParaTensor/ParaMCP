@@ -1,9 +1,9 @@
+use paramcp::hub::HubManager;
 use paramcp::protocol::{JsonRpcRequest, RequestId};
 use paramcp::server::McpServer;
 use paramcp::tools::ToolRegistry;
 use serde_json::json;
 use std::sync::Arc;
-use paramcp::hub::HubManager;
 
 #[tokio::test]
 async fn test_server_discover() {
@@ -23,8 +23,20 @@ async fn test_server_discover() {
     assert!(resp.error.is_none());
 
     let result = resp.result.unwrap();
-    assert_eq!(result.get("protocolVersion").unwrap().as_str().unwrap(), "2026-07-28");
-    assert_eq!(result.get("serverInfo").unwrap().get("name").unwrap().as_str().unwrap(), "paramcp");
+    assert_eq!(
+        result.get("protocolVersion").unwrap().as_str().unwrap(),
+        "2026-07-28"
+    );
+    assert_eq!(
+        result
+            .get("serverInfo")
+            .unwrap()
+            .get("name")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "paramcp"
+    );
 }
 
 #[tokio::test]
@@ -46,14 +58,20 @@ async fn test_tools_list() {
     let tools = result.get("tools").unwrap().as_array().unwrap();
     assert!(tools.len() >= 4); // sys_info, calculator, file_search, fetch_url
 
-    let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
+    let tool_names: Vec<&str> = tools
+        .iter()
+        .map(|t| t.get("name").unwrap().as_str().unwrap())
+        .collect();
     assert!(tool_names.contains(&"sys_info"));
     assert!(tool_names.contains(&"calculator"));
     assert!(tool_names.contains(&"file_search"));
     assert!(tool_names.contains(&"fetch_url"));
 
     assert_eq!(result.get("ttlMs").unwrap().as_u64().unwrap(), 300_000);
-    assert_eq!(result.get("cacheScope").unwrap().as_str().unwrap(), "shared");
+    assert_eq!(
+        result.get("cacheScope").unwrap().as_str().unwrap(),
+        "shared"
+    );
 }
 
 #[tokio::test]
@@ -78,7 +96,7 @@ async fn test_tools_call_calculator() {
 
     let result = resp.result.unwrap();
     assert!(!result.get("isError").unwrap().as_bool().unwrap());
-    
+
     let content = result.get("content").unwrap().as_array().unwrap();
     let text = content[0].get("text").unwrap().as_str().unwrap();
     assert_eq!(text, "20");
@@ -104,7 +122,7 @@ async fn test_tools_call_sys_info() {
 
     let result = resp.result.unwrap();
     assert!(!result.get("isError").unwrap().as_bool().unwrap());
-    
+
     let content = result.get("content").unwrap().as_array().unwrap();
     let text = content[0].get("text").unwrap().as_str().unwrap();
     assert!(text.contains("hostname"));
@@ -117,7 +135,8 @@ async fn test_tools_call_file_search() {
     let registry = Arc::new(ToolRegistry::new());
     let server = McpServer::new(registry, HubManager::empty());
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set in test");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set in test");
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(RequestId::Number(4)),
@@ -137,7 +156,7 @@ async fn test_tools_call_file_search() {
 
     let result = resp.result.unwrap();
     assert!(!result.get("isError").unwrap().as_bool().unwrap());
-    
+
     let content = result.get("content").unwrap().as_array().unwrap();
     let text = content[0].get("text").unwrap().as_str().unwrap();
     assert!(text.contains("Cargo.toml"));
@@ -148,14 +167,22 @@ async fn test_tools_call_file_search() {
 async fn test_http_transport() {
     let registry = Arc::new(ToolRegistry::new());
     let server = McpServer::new(registry, HubManager::empty());
-    
+
     // Find an unused local port
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
     let server_handle = tokio::spawn(async move {
-        paramcp::transport::http::run_http_transport(Arc::new(server), "127.0.0.1", port, None, None).await.unwrap();
+        paramcp::transport::http::run_http_transport(
+            Arc::new(server),
+            "127.0.0.1",
+            port,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     });
 
     // Wait a brief moment for the server to start
@@ -165,7 +192,8 @@ async fn test_http_transport() {
     let url = format!("http://127.0.0.1:{}/mcp", port);
 
     // 1. Valid request
-    let resp = client.post(&url)
+    let resp = client
+        .post(&url)
         .header("MCP-Protocol-Version", "2026-07-28")
         .header("Mcp-Method", "server/discover")
         .json(&json!({
@@ -182,10 +210,19 @@ async fn test_http_transport() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body.get("jsonrpc").unwrap().as_str().unwrap(), "2.0");
     assert_eq!(body.get("id").unwrap().as_i64().unwrap(), 10);
-    assert_eq!(body.get("result").unwrap().get("protocolVersion").unwrap().as_str().unwrap(), "2026-07-28");
+    assert_eq!(
+        body.get("result")
+            .unwrap()
+            .get("protocolVersion")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "2026-07-28"
+    );
 
     // 2. Request missing MCP-Protocol-Version header
-    let resp_missing_ver = client.post(&url)
+    let resp_missing_ver = client
+        .post(&url)
         .header("Mcp-Method", "server/discover")
         .json(&json!({
             "jsonrpc": "2.0",
@@ -199,7 +236,8 @@ async fn test_http_transport() {
     assert_eq!(resp_missing_ver.status(), reqwest::StatusCode::BAD_REQUEST);
 
     // 3. Request with mismatched Mcp-Method header
-    let resp_mismatched_method = client.post(&url)
+    let resp_mismatched_method = client
+        .post(&url)
         .header("MCP-Protocol-Version", "2026-07-28")
         .header("Mcp-Method", "tools/list")
         .json(&json!({
@@ -211,7 +249,10 @@ async fn test_http_transport() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp_mismatched_method.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(
+        resp_mismatched_method.status(),
+        reqwest::StatusCode::BAD_REQUEST
+    );
 
     // Stop server
     server_handle.abort();
@@ -239,7 +280,7 @@ async fn test_invalid_request() {
 async fn test_hub_aggregation_and_proxy() {
     let _ = tracing_subscriber::fmt().try_init();
     let registry = Arc::new(ToolRegistry::new());
-    
+
     // Dynamically build portable test config using CARGO_MANIFEST_DIR + scratch mocks
     let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let scratch = format!("{}/scratch", manifest);
@@ -267,7 +308,11 @@ async fn test_hub_aggregation_and_proxy() {
     );
     std::fs::write(&temp_config_path, &config_json).expect("Failed to write temp test config");
     let config_path = std::path::Path::new(&temp_config_path);
-    let hub = Arc::new(HubManager::new(config_path).await.expect("Failed to initialize HubManager with portable config"));
+    let hub = Arc::new(
+        HubManager::new(config_path)
+            .await
+            .expect("Failed to initialize HubManager with portable config"),
+    );
     let server = McpServer::new(registry, Arc::clone(&hub));
 
     // 1. Check tools list aggregation
@@ -279,11 +324,14 @@ async fn test_hub_aggregation_and_proxy() {
     };
     let resp = server.handle_request(list_req).await;
     assert!(resp.error.is_none());
-    
+
     let result = resp.result.unwrap();
     let tools = result.get("tools").unwrap().as_array().unwrap();
-    
-    let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
+
+    let tool_names: Vec<&str> = tools
+        .iter()
+        .map(|t| t.get("name").unwrap().as_str().unwrap())
+        .collect();
     // Built-in tools
     assert!(tool_names.contains(&"sys_info"));
     assert!(tool_names.contains(&"calculator"));
@@ -344,7 +392,10 @@ async fn test_resources_read() {
     let result = resp.result.unwrap();
     let contents = result.get("contents").unwrap().as_array().unwrap();
     assert_eq!(contents.len(), 1);
-    assert_eq!(contents[0].get("uri").unwrap().as_str().unwrap(), "paramcp://server/info");
+    assert_eq!(
+        contents[0].get("uri").unwrap().as_str().unwrap(),
+        "paramcp://server/info"
+    );
     let text = contents[0].get("text").unwrap().as_str().unwrap();
     assert!(text.contains("paramcp"));
 }
@@ -373,7 +424,13 @@ async fn test_prompts_get() {
     let result = resp.result.unwrap();
     let messages = result.get("messages").unwrap().as_array().unwrap();
     assert_eq!(messages.len(), 1);
-    let text = messages[0].get("content").unwrap().get("text").unwrap().as_str().unwrap();
+    let text = messages[0]
+        .get("content")
+        .unwrap()
+        .get("text")
+        .unwrap()
+        .as_str()
+        .unwrap();
     assert!(text.contains("rust"));
     assert!(text.contains("fn main() {}"));
 }
@@ -388,7 +445,15 @@ async fn test_health_endpoint() {
     drop(listener);
 
     let server_handle = tokio::spawn(async move {
-        paramcp::transport::http::run_http_transport(Arc::new(server), "127.0.0.1", port, None, None).await.unwrap();
+        paramcp::transport::http::run_http_transport(
+            Arc::new(server),
+            "127.0.0.1",
+            port,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     });
 
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -403,7 +468,10 @@ async fn test_health_endpoint() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body.get("status").unwrap().as_str().unwrap(), "ok");
-    assert_eq!(body.get("version").unwrap().as_str().unwrap(), env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        body.get("version").unwrap().as_str().unwrap(),
+        env!("CARGO_PKG_VERSION")
+    );
 
     server_handle.abort();
 }

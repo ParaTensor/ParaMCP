@@ -66,12 +66,15 @@ enum TransportType {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Setup tracing/logging output
+    // Setup tracing/logging output.
+    // IMPORTANT: stdout is reserved exclusively for the JSON-RPC stream in stdio
+    // transport mode, so all logs must go to stderr.
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new("paramcp=info,tower_http=debug")),
         )
+        .with_writer(std::io::stderr)
         .init();
 
     let args = Args::parse();

@@ -2,3 +2,6 @@
 intent_Cargo.toml
 xtrace_AGENTS.md
 xtrace_Cargo.toml
+
+# Zene local tooling / credentials
+.zene/

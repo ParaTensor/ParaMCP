@@ -33,7 +33,10 @@ pub async fn handle_mcp_post(
     }
 
     // 1. Verify MCP-Protocol-Version header is present
-    let version_header = match headers.get("MCP-Protocol-Version").and_then(|v| v.to_str().ok()) {
+    let version_header = match headers
+        .get("MCP-Protocol-Version")
+        .and_then(|v| v.to_str().ok())
+    {
         Some(v) => v,
         None => {
             return (
@@ -49,7 +52,11 @@ pub async fn handle_mcp_post(
     let method_header = match headers.get("Mcp-Method").and_then(|v| v.to_str().ok()) {
         Some(m) => m,
         None => {
-            return (StatusCode::BAD_REQUEST, "Missing or invalid Mcp-Method header").into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                "Missing or invalid Mcp-Method header",
+            )
+                .into_response();
         }
     };
 
@@ -159,7 +166,10 @@ pub async fn run_http_transport(
         .with_state(server);
 
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
-    info!("Starting high-performance HTTP MCP server listening on {}", addr);
+    info!(
+        "Starting high-performance HTTP MCP server listening on {}",
+        addr
+    );
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

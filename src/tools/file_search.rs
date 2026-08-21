@@ -2,11 +2,11 @@ use crate::protocol::{ToolCallContent, ToolCallResult, ToolCallTextContent, Tool
 use crate::tools::Tool;
 use regex::Regex;
 use serde_json::{json, Value};
-use std::future::Future;
-use std::pin::Pin;
 use std::fs::File;
+use std::future::Future;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 pub struct FileSearchTool;
 
@@ -52,17 +52,29 @@ impl Tool for FileSearchTool {
         }
     }
 
-    fn call(&self, arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
+    fn call(
+        &self,
+        arguments: Option<Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
         Box::pin(async move {
-            let dir_str = match arguments.as_ref().and_then(|a| a.get("dir").and_then(|d| d.as_str())) {
+            let dir_str = match arguments
+                .as_ref()
+                .and_then(|a| a.get("dir").and_then(|d| d.as_str()))
+            {
                 Some(d) => d.to_string(),
                 None => return missing_arg("dir"),
             };
-            let pattern_str = match arguments.as_ref().and_then(|a| a.get("pattern").and_then(|p| p.as_str())) {
+            let pattern_str = match arguments
+                .as_ref()
+                .and_then(|a| a.get("pattern").and_then(|p| p.as_str()))
+            {
                 Some(p) => p.to_string(),
                 None => return missing_arg("pattern"),
             };
-            let extension = arguments.as_ref().and_then(|a| a.get("extension").and_then(|e| e.as_str())).map(|s| s.to_string());
+            let extension = arguments
+                .as_ref()
+                .and_then(|a| a.get("extension").and_then(|e| e.as_str()))
+                .map(|s| s.to_string());
 
             // Offload all FS walk + user regex + output building to blocking thread (prevents starving async runtime)
             let tool_res = match tokio::task::spawn_blocking(move || {
@@ -145,7 +157,7 @@ fn is_binary_file(path: &Path) -> std::io::Result<bool> {
     let mut file = File::open(path)?;
     let mut buffer = [0; 1024];
     let bytes_read = file.read(&mut buffer)?;
-    
+
     // Check for null bytes in the first 1024 bytes
     for &byte in &buffer[..bytes_read] {
         if byte == 0 {

@@ -26,7 +26,10 @@ impl Tool for CalculatorTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "calculator".to_string(),
-            description: Some("Evaluate a mathematical expression. Supports +, -, *, /, and parentheses.".to_string()),
+            description: Some(
+                "Evaluate a mathematical expression. Supports +, -, *, /, and parentheses."
+                    .to_string(),
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -40,9 +43,16 @@ impl Tool for CalculatorTool {
         }
     }
 
-    fn call(&self, arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
+    fn call(
+        &self,
+        arguments: Option<Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
         Box::pin(async move {
-            let expr = match arguments.and_then(|a| a.get("expr").and_then(|e| e.as_str()).map(|s| s.to_string())) {
+            let expr = match arguments.and_then(|a| {
+                a.get("expr")
+                    .and_then(|e| e.as_str())
+                    .map(|s| s.to_string())
+            }) {
                 Some(e) => e,
                 None => {
                     return Ok(ToolCallResult {
@@ -127,7 +137,9 @@ fn tokenize(expr: &str) -> Result<Vec<Token>, String> {
                         break;
                     }
                 }
-                let val: f64 = num_str.parse().map_err(|_| format!("Invalid number: {}", num_str))?;
+                let val: f64 = num_str
+                    .parse()
+                    .map_err(|_| format!("Invalid number: {}", num_str))?;
                 tokens.push(Token::Number(val));
             }
             _ => return Err(format!("Unexpected character: '{}'", c)),
@@ -201,7 +213,9 @@ impl Parser {
     }
 
     fn parse_factor(&mut self) -> Result<f64, String> {
-        let tok = self.consume().ok_or_else(|| "Unexpected end of expression".to_string())?;
+        let tok = self
+            .consume()
+            .ok_or_else(|| "Unexpected end of expression".to_string())?;
         match tok {
             Token::Number(val) => Ok(val),
             Token::Minus => {
@@ -250,4 +264,3 @@ mod tests {
         assert!(evaluate("2 + (3").is_err());
     }
 }
-

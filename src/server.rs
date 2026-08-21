@@ -18,7 +18,10 @@ impl McpServer {
 
     /// Handles a stateless or stateful JSON-RPC 2.0 request and returns a JSON-RPC response.
     pub async fn handle_request(&self, req: JsonRpcRequest) -> JsonRpcResponse {
-        info!("Handling MCP request: id={:?}, method={}", req.id, req.method);
+        info!(
+            "Handling MCP request: id={:?}, method={}",
+            req.id, req.method
+        );
 
         // Standard JSON-RPC validation
         if req.jsonrpc != "2.0" {
@@ -33,7 +36,10 @@ impl McpServer {
         // Trace and telemetry extraction from metadata (_meta)
         if let Some(meta) = req.extract_meta() {
             if let Some(client_info) = meta.client_info {
-                info!("Request client info: {} v{}", client_info.name, client_info.version);
+                info!(
+                    "Request client info: {} v{}",
+                    client_info.name, client_info.version
+                );
             }
             if let Some(traceparent) = meta.traceparent {
                 info!("Trace context active: traceparent={}", traceparent);
@@ -61,7 +67,9 @@ impl McpServer {
 
     async fn handle_initialize(&self, req: JsonRpcRequest) -> JsonRpcResponse {
         // Return initialize capabilities compatible with legacy clients
-        let client_version = req.params.as_ref()
+        let client_version = req
+            .params
+            .as_ref()
             .and_then(|p| p.get("protocolVersion"))
             .and_then(|v| v.as_str())
             .unwrap_or("2024-11-05");
@@ -150,24 +158,28 @@ impl McpServer {
         };
 
         // Check if the tool belongs to a proxy subserver
-        if let Some((subserver_name, original_tool_name)) = self.hub.get_routing(&call_params.name) {
+        if let Some((subserver_name, original_tool_name)) = self.hub.get_routing(&call_params.name)
+        {
             if let Some(host) = self.hub.get_host(&subserver_name) {
                 // Rewrite the request parameter 'name' to the original name expected by the child
                 let mut modified_params = params.clone();
                 if let Some(obj) = modified_params.as_object_mut() {
                     obj.insert("name".to_string(), json!(original_tool_name));
                 }
-                
+
                 let mut modified_req = req.clone();
                 modified_req.params = Some(modified_params);
-                
+
                 match host.call(modified_req).await {
                     Ok(resp) => return resp,
                     Err(e) => {
                         return JsonRpcResponse::error(
                             req.id,
                             INTERNAL_ERROR,
-                            format!("Failed to proxy call to subserver '{}': {}", subserver_name, e),
+                            format!(
+                                "Failed to proxy call to subserver '{}': {}",
+                                subserver_name, e
+                            ),
                             None,
                         );
                     }
@@ -203,7 +215,9 @@ impl McpServer {
                 };
                 match serde_json::to_value(error_res) {
                     Ok(val) => JsonRpcResponse::success(req.id, val),
-                    Err(err) => JsonRpcResponse::error(req.id, INTERNAL_ERROR, err.to_string(), None),
+                    Err(err) => {
+                        JsonRpcResponse::error(req.id, INTERNAL_ERROR, err.to_string(), None)
+                    }
                 }
             }
         }
@@ -211,14 +225,12 @@ impl McpServer {
 
     async fn handle_resources_list(&self, req: JsonRpcRequest) -> JsonRpcResponse {
         let result = ResourcesListResult {
-            resources: vec![
-                ResourceDefinition {
-                    uri: "paramcp://server/info".to_string(),
-                    name: "Server Info".to_string(),
-                    description: Some("Basic metadata about the ParaMCP server instance.".to_string()),
-                    mime_type: Some("application/json".to_string()),
-                },
-            ],
+            resources: vec![ResourceDefinition {
+                uri: "paramcp://server/info".to_string(),
+                name: "Server Info".to_string(),
+                description: Some("Basic metadata about the ParaMCP server instance.".to_string()),
+                mime_type: Some("application/json".to_string()),
+            }],
             ttl_ms: Some(300_000),
             cache_scope: Some("shared".to_string()),
         };
@@ -284,24 +296,22 @@ impl McpServer {
 
     async fn handle_prompts_list(&self, req: JsonRpcRequest) -> JsonRpcResponse {
         let result = PromptsListResult {
-            prompts: vec![
-                PromptDefinition {
-                    name: "explain-code".to_string(),
-                    description: Some("Explain a piece of code in plain language.".to_string()),
-                    arguments: Some(vec![
-                        PromptArgument {
-                            name: "language".to_string(),
-                            description: Some("Programming language of the code.".to_string()),
-                            required: Some(true),
-                        },
-                        PromptArgument {
-                            name: "code".to_string(),
-                            description: Some("The code snippet to explain.".to_string()),
-                            required: Some(true),
-                        },
-                    ]),
-                },
-            ],
+            prompts: vec![PromptDefinition {
+                name: "explain-code".to_string(),
+                description: Some("Explain a piece of code in plain language.".to_string()),
+                arguments: Some(vec![
+                    PromptArgument {
+                        name: "language".to_string(),
+                        description: Some("Programming language of the code.".to_string()),
+                        required: Some(true),
+                    },
+                    PromptArgument {
+                        name: "code".to_string(),
+                        description: Some("The code snippet to explain.".to_string()),
+                        required: Some(true),
+                    },
+                ]),
+            }],
         };
         match serde_json::to_value(result) {
             Ok(val) => JsonRpcResponse::success(req.id, val),
@@ -351,17 +361,15 @@ impl McpServer {
 
                 let result = PromptGetResult {
                     description: Some(format!("Explain the following {} code.", language)),
-                    messages: vec![
-                        PromptMessage {
-                            role: "user".to_string(),
-                            content: PromptContent::Text(PromptMessageText {
-                                text: format!(
-                                    "Please explain this {} code in plain language:\n\n```{}\n{}\n```",
-                                    language, language, code
-                                ),
-                            }),
-                        },
-                    ],
+                    messages: vec![PromptMessage {
+                        role: "user".to_string(),
+                        content: PromptContent::Text(PromptMessageText {
+                            text: format!(
+                                "Please explain this {} code in plain language:\n\n```{}\n{}\n```",
+                                language, language, code
+                            ),
+                        }),
+                    }],
                 };
                 match serde_json::to_value(result) {
                     Ok(val) => JsonRpcResponse::success(req.id, val),

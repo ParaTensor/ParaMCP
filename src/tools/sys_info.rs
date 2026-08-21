@@ -31,7 +31,10 @@ impl Tool for SysInfoTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "sys_info".to_string(),
-            description: Some("Fetch high-performance system metrics (CPU load, memory usage, host details).".to_string()),
+            description: Some(
+                "Fetch high-performance system metrics (CPU load, memory usage, host details)."
+                    .to_string(),
+            ),
             input_schema: json!({
                 "type": "object",
                 "properties": {}
@@ -39,7 +42,10 @@ impl Tool for SysInfoTool {
         }
     }
 
-    fn call(&self, _arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
+    fn call(
+        &self,
+        _arguments: Option<Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
         Box::pin(async move {
             let mut sys = self.system.lock().unwrap();
             sys.refresh_all();

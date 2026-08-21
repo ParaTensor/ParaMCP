@@ -75,12 +75,13 @@ impl FetchUrlTool {
         text = self.re_tags.replace_all(&text, "").to_string();
 
         // 7. Decode common HTML entities
-        text = text.replace("&nbsp;", " ")
-                   .replace("&lt;", "<")
-                   .replace("&gt;", ">")
-                   .replace("&amp;", "&")
-                   .replace("&quot;", "\"")
-                   .replace("&#39;", "'");
+        text = text
+            .replace("&nbsp;", " ")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'");
 
         // 8. Normalize spacing and consecutive blank lines
         text = self.re_whitespace.replace_all(&text, " ").to_string();
@@ -118,12 +119,20 @@ impl Tool for FetchUrlTool {
         }
     }
 
-    fn call(&self, arguments: Option<Value>) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
+    fn call(
+        &self,
+        arguments: Option<Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<ToolCallResult>> + Send + '_>> {
         Box::pin(async move {
-            let url_str = match arguments.as_ref().and_then(|a| a.get("url").and_then(|u| u.as_str())) {
+            let url_str = match arguments
+                .as_ref()
+                .and_then(|a| a.get("url").and_then(|u| u.as_str()))
+            {
                 Some(u) => u,
                 None => {
-                    return Ok(error_result("Error: Missing required argument 'url'".to_string()));
+                    return Ok(error_result(
+                        "Error: Missing required argument 'url'".to_string(),
+                    ));
                 }
             };
 
@@ -138,7 +147,10 @@ impl Tool for FetchUrlTool {
 
             let status = response.status();
             if !status.is_success() {
-                return Ok(error_result(format!("Server returned error status: {}", status)));
+                return Ok(error_result(format!(
+                    "Server returned error status: {}",
+                    status
+                )));
             }
 
             let html = match response.text().await {
@@ -160,9 +172,7 @@ impl Tool for FetchUrlTool {
 
 fn error_result(msg: String) -> ToolCallResult {
     ToolCallResult {
-        content: vec![ToolCallContent::Text(ToolCallTextContent {
-            text: msg,
-        })],
+        content: vec![ToolCallContent::Text(ToolCallTextContent { text: msg })],
         is_error: true,
     }
 }
@@ -173,14 +183,32 @@ fn is_safe_url(url: &str) -> Result<(), String> {
     if !lower.starts_with("http://") && !lower.starts_with("https://") {
         return Err("Only http:// or https:// URLs are allowed".to_string());
     }
-    if lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("[::1]") || lower.contains("0.0.0.0") {
+    if lower.contains("localhost")
+        || lower.contains("127.0.0.1")
+        || lower.contains("[::1]")
+        || lower.contains("0.0.0.0")
+    {
         return Err("SSRF blocked: localhost / loopback addresses are not allowed".to_string());
     }
-    if lower.contains("10.") || lower.contains("192.168.") || lower.contains("172.16.") || lower.contains("172.17.") || lower.contains("172.18.") || lower.contains("172.31.") {
-        return Err("SSRF blocked: private network ranges (10/8, 172.16/12, 192.168/16) are not allowed".to_string());
+    if lower.contains("10.")
+        || lower.contains("192.168.")
+        || lower.contains("172.16.")
+        || lower.contains("172.17.")
+        || lower.contains("172.18.")
+        || lower.contains("172.31.")
+    {
+        return Err(
+            "SSRF blocked: private network ranges (10/8, 172.16/12, 192.168/16) are not allowed"
+                .to_string(),
+        );
     }
-    if lower.contains("169.254.") || lower.contains("metadata.google") || lower.contains("169.254.169.254") {
-        return Err("SSRF blocked: link-local / cloud metadata endpoints are not allowed".to_string());
+    if lower.contains("169.254.")
+        || lower.contains("metadata.google")
+        || lower.contains("169.254.169.254")
+    {
+        return Err(
+            "SSRF blocked: link-local / cloud metadata endpoints are not allowed".to_string(),
+        );
     }
     Ok(())
 }

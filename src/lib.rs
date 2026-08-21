@@ -1,5 +1,5 @@
+pub mod hub;
 pub mod protocol;
 pub mod server;
 pub mod tools;
 pub mod transport;
-pub mod hub;

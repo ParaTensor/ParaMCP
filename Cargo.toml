@@ -7,6 +7,9 @@ license = "MIT"
 keywords = ["mcp", "llm", "agent", "gateway", "json-rpc"]
 categories = ["network-programming", "web-programming::http-server"]
 
+# Keep this crate independent of any surrounding workspace (e.g. nested checkout paths).
+[workspace]
+
 [profile.release]
 lto = true
 strip = true
